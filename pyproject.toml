@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.11"
 httpx = "^0.28.1"
 pyrotgfork = {extras = ["fast"], version = "^2.2.15"}
+loguru = "^0.7.3"
 
 
 [build-system]
