@@ -1,0 +1,24 @@
+services:
+  reddit-to-telegram:
+    build: .
+    pull_policy: build
+    volumes: ['r2t_state:/reddit2telegram-state']
+    environment:
+      - REDDIT_API_ID=${REDDIT_API_ID}
+      - REDDIT_API_SECRET=${REDDIT_API_SECRET}
+      - REDDIT_API_ACCESS_TOKEN=${REDDIT_API_ACCESS_TOKEN}
+      - REDDIT_API_REFRESH_TOKEN=${REDDIT_API_REFRESH_TOKEN}
+      - REDDIT_API_USERNAME=${REDDIT_API_USERNAME}
+      - REDDIT_LAST_KNOWN_ID=${REDDIT_LAST_KNOWN_ID}
+      - REDDIT_USERNAME=${REDDIT_USERNAME}
+      - TG_API_ID=${TG_API_ID}
+      - TG_API_HASH=${TG_API_HASH}
+      - BOT_TOKEN=${BOT_TOKEN}
+      - CHANNEL_ID=${CHANNEL_ID}
+      - LOG_CHAT_ID=${LOG_CHAT_ID}
+      - STATE_FILE=/reddit2telegram-state/reddit2telegram.state
+    restart: unless-stopped
+
+volumes:
+  r2t_state:
+    driver: local
