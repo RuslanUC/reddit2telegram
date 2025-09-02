@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "reddit-to-telegram"
+version = "0.1.0"
+description = ""
+authors = ["RuslanUC <dev_ruslan_uc@protonmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+httpx = "^0.28.1"
+pyrotgfork = {extras = ["fast"], version = "^2.2.15"}
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
