@@ -34,4 +34,4 @@ COPY . .
 RUN chmod +x entrypoint.sh
 
 ENTRYPOINT ["/usr/local/bin/dumb-init", "--"]
-CMD ["${SRC_DIR}/entrypoint.sh"]
+CMD ["/reddit2telegram/entrypoint.sh"]
