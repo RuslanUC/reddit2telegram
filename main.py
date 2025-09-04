@@ -7,11 +7,16 @@ from httpx import AsyncClient
 from loguru import logger
 from pyrogram import Client
 from pyrogram.enums import ParseMode
-from pyrogram.types import InputMediaPhoto
+from pyrogram.types import InputMediaPhoto, InputMedia, InputMediaVideo
 
-from reddit_api import RedditClient
+from reddit_api import RedditClient, RedditPostMediaVideo, RedditPostMediaImage, RedditPostMedia
 from state import State
 from utils import flood_wait
+
+input_media_item_cls: dict[type[RedditPostMedia], type[InputMedia]] = {
+    RedditPostMediaImage: InputMediaPhoto,
+    RedditPostMediaVideo: InputMediaVideo,
+}
 
 
 async def main() -> None:
@@ -70,39 +75,51 @@ async def main() -> None:
             for post in posts:
                 logger.debug(f"Post: {post!r}")
 
-                if not post.images or len(post.images) > 10:
-                    logger.info(f"Skipping post {post.id} ({post.title!r}): {len(post.images)=}")
+                if not post.media or len(post.media) > 10:
+                    logger.info(f"Skipping post {post.id} ({post.title!r}): {len(post.media)=}")
                     continue
 
                 logger.info(f"Sending post {post.id} ({post.title!r})")
 
-                image_files: list[BytesIO] = []
-                for idx, image in enumerate(post.images):
+                media_files: list[BytesIO] = []
+                for idx, media in enumerate(post.media):
                     photo = BytesIO()
                     async with AsyncClient() as cl:
-                        async with cl.stream("GET", image) as resp:
+                        async with cl.stream("GET", media.url) as resp:
                             async for chunk in resp.aiter_bytes(1024 * 64):
                                 photo.write(chunk)
 
-                    name = urlparse(image).path.split("/")[-1]
+                    name = urlparse(media.url).path.split("/")[-1]
                     if not name:
                         name = f"{post.fullname}_{idx}.jpg"
                     setattr(photo, "name", name)
-                    image_files.append(photo)
+                    media_files.append(photo)
 
                 caption = f"{post.title}\n\n[Post link]({post.url})"
 
-                if len(post.images) == 1:
-                    await flood_wait(
-                        bot.send_photo,
-                        chat_id=channel_id,
-                        photo=image_files[0],
-                        caption=caption,
-                    )
-                elif len(post.images) > 1:
+                if len(post.media) == 1:
+                    media = post.media[0]
+                    if isinstance(media, RedditPostMediaImage):
+                        await flood_wait(
+                            bot.send_photo,
+                            chat_id=channel_id,
+                            photo=media_files[0],
+                            caption=caption,
+                        )
+                    elif isinstance(media, RedditPostMediaVideo):
+                        await flood_wait(
+                            bot.send_video,
+                            chat_id=channel_id,
+                            video=media_files[0],
+                            caption=caption,
+                            width=media.width,
+                            height=media.height,
+                            duration=media.duration,
+                        )
+                elif len(post.media) > 1:
                     media = [
-                        InputMediaPhoto(file, caption=caption if idx == 0 else "")
-                        for idx, file in enumerate(image_files)
+                        input_media_item_cls[type(post.media[idx])](file, caption=caption if idx == 0 else "")
+                        for idx, file in enumerate(media_files)
                     ]
 
                     await flood_wait(

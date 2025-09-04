@@ -1,4 +1,6 @@
+import inspect
 import platform
+from enum import Enum, auto
 from os import urandom
 from time import time
 
@@ -9,15 +11,52 @@ from state import State
 from utils import BearerAuth
 
 
-class RedditPost:
-    __slots__ = ("id", "fullname", "subreddit", "title", "images")
+class RedditPostMedia:
+    __slots__ = ("url",)
 
-    def __init__(self, id_: str, fullname: str, subreddit: str, title: str, images: list[str]) -> None:
+    def __init__(self, url: str) -> None:
+        self.url = url
+
+    @classmethod
+    def _all_slots(cls) -> list[str]:
+        slots = []
+        for parent_cls in inspect.getmro(cls.__class__):
+            if hasattr(parent_cls, "__slots__"):
+                slots.extend(parent_cls.__slots__)
+
+        return slots
+
+    def __repr__(self) -> str:
+        slots = ", ".join(f"{slot}={getattr(self, slot)!r}" for slot in self._all_slots())
+        return f"{self.__class__.__name__}({slots})"
+
+
+class RedditPostMediaImage(RedditPostMedia):
+    __slots__ = ()
+
+    def __init__(self, url: str) -> None:
+        super().__init__(url)
+
+
+class RedditPostMediaVideo(RedditPostMedia):
+    __slots__ = ("width", "height", "duration",)
+
+    def __init__(self, url: str, width: int, height: int, duration: int) -> None:
+        super().__init__(url)
+        self.width = width
+        self.height = height
+        self.duration = duration
+
+
+class RedditPost:
+    __slots__ = ("id", "fullname", "subreddit", "title", "media")
+
+    def __init__(self, id_: str, fullname: str, subreddit: str, title: str, media: list[RedditPostMedia]) -> None:
         self.id = id_
         self.fullname = fullname
         self.subreddit = subreddit
         self.title = title
-        self.images = images
+        self.media = media
 
     @property
     def url(self) -> str:
@@ -153,7 +192,7 @@ class RedditClient:
                     continue
                 post = post["data"]
 
-                images = []
+                media = []
                 if post.get("is_gallery"):
                     if "gallery_data" not in post \
                             or not isinstance(post["gallery_data"], dict) \
@@ -179,7 +218,33 @@ class RedditClient:
                             logger.info(f"Post {post['id']}: invalid metadata: {metadata}")
                             continue
 
-                        images.append(metadata["s"]["u"])
+                        media.append(RedditPostMediaImage(metadata["s"]["u"]))
+                elif post.get("is_video"):
+                    if "media" not in post \
+                            or not isinstance(post["media"], dict) \
+                            or "reddit_video" not in post["media"] \
+                            or not isinstance(post["media"]["reddit_video"], dict):
+                        logger.info(f"Post {post['id']} has invalid \"media\" field: {post['media']}")
+                        continue
+
+                    video_info = post["media"]["reddit_video"]
+                    if "fallback_url" not in video_info \
+                            or not isinstance(video_info["fallback_url"], str) \
+                            or "width" not in video_info \
+                            or not isinstance(video_info["width"], int) \
+                            or "height" not in video_info \
+                            or not isinstance(video_info["height"], int) \
+                            or "duration" not in video_info \
+                            or not isinstance(video_info["duration"], (int, float)):
+                        logger.info(f"Post {post['id']} has invalid \"media\" field: {post['media']}")
+                        continue
+
+                    media.append(RedditPostMediaVideo(
+                        video_info["fallback_url"],
+                        video_info["width"],
+                        video_info["height"],
+                        video_info["duration"],
+                    ))
                 elif post.get("preview"):
                     if not isinstance(post["preview"], dict) \
                             or "images" not in post["preview"] \
@@ -194,10 +259,10 @@ class RedditClient:
                         logger.info(f"Post {post['id']} has invalid \"preview\" field: {post['preview']}")
                         continue
 
-                    images.append(post["preview"]["images"][0]["source"]["url"])
+                    media.append(RedditPostMediaImage(post["preview"]["images"][0]["source"]["url"]))
 
-                if not images or len(images) > 10:
-                    logger.info(f"Post {post['id']} does not have any images or has more than 10 images")
+                if not media or len(media) > 10:
+                    logger.info(f"Post {post['id']} does not have any media or has more than 10 media items")
                     continue
 
                 result.append(RedditPost(
@@ -205,7 +270,7 @@ class RedditClient:
                     fullname=post["name"],
                     subreddit=post["subreddit"],
                     title=post["title"],
-                    images=images,
+                    media=media,
                 ))
 
         logger.debug(f"Got {len(result)} after processing")
