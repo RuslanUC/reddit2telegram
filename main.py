@@ -134,7 +134,13 @@ async def main() -> None:
                     await _send_one_post(bot, channel_id, post, media_files)
                 except Exception as e:
                     logger.opt(exception=e).error("Failed to send post to telegram")
-                    await bot.send_message(log_chat_id, f"Failed to send post to the channel, error: {e}")
+                    await bot.send_message(
+                        log_chat_id,
+                        (
+                            f"Failed to send post to the channel, error: {e}\n"
+                            f"Post link: {post.url}"
+                        )
+                    )
 
             if posts:
                 state.reddit_last_seen_id = posts[-1].fullname
