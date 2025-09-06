@@ -9,7 +9,7 @@ from pyrogram import Client
 from pyrogram.enums import ParseMode
 from pyrogram.types import InputMediaPhoto, InputMedia, InputMediaVideo
 
-from reddit_api import RedditClient, RedditPostMediaVideo, RedditPostMediaImage, RedditPostMedia
+from reddit_api import RedditClient, RedditPostMediaVideo, RedditPostMediaImage, RedditPostMedia, RedditPost
 from state import State
 from utils import flood_wait
 
@@ -17,6 +17,41 @@ input_media_item_cls: dict[type[RedditPostMedia], type[InputMedia]] = {
     RedditPostMediaImage: InputMediaPhoto,
     RedditPostMediaVideo: InputMediaVideo,
 }
+
+
+async def _send_one_post(bot: Client, channel_id: int, post: RedditPost, media_files: list[BytesIO]) -> None:
+    caption = f"{post.title}\n\n[Post link]({post.url})"
+
+    if len(post.media) == 1:
+        media = post.media[0]
+        if isinstance(media, RedditPostMediaImage):
+            await flood_wait(
+                bot.send_photo,
+                chat_id=channel_id,
+                photo=media_files[0],
+                caption=caption,
+            )
+        elif isinstance(media, RedditPostMediaVideo):
+            await flood_wait(
+                bot.send_video,
+                chat_id=channel_id,
+                video=media_files[0],
+                caption=caption,
+                width=media.width,
+                height=media.height,
+                duration=media.duration,
+            )
+    elif len(post.media) > 1:
+        media = [
+            input_media_item_cls[type(post.media[idx])](file, caption=caption if idx == 0 else "")
+            for idx, file in enumerate(media_files)
+        ]
+
+        await flood_wait(
+            bot.send_media_group,
+            chat_id=channel_id,
+            media=media,
+        )
 
 
 async def main() -> None:
@@ -95,38 +130,11 @@ async def main() -> None:
                     setattr(photo, "name", name)
                     media_files.append(photo)
 
-                caption = f"{post.title}\n\n[Post link]({post.url})"
-
-                if len(post.media) == 1:
-                    media = post.media[0]
-                    if isinstance(media, RedditPostMediaImage):
-                        await flood_wait(
-                            bot.send_photo,
-                            chat_id=channel_id,
-                            photo=media_files[0],
-                            caption=caption,
-                        )
-                    elif isinstance(media, RedditPostMediaVideo):
-                        await flood_wait(
-                            bot.send_video,
-                            chat_id=channel_id,
-                            video=media_files[0],
-                            caption=caption,
-                            width=media.width,
-                            height=media.height,
-                            duration=media.duration,
-                        )
-                elif len(post.media) > 1:
-                    media = [
-                        input_media_item_cls[type(post.media[idx])](file, caption=caption if idx == 0 else "")
-                        for idx, file in enumerate(media_files)
-                    ]
-
-                    await flood_wait(
-                        bot.send_media_group,
-                        chat_id=channel_id,
-                        media=media,
-                    )
+                try:
+                    await _send_one_post(bot, channel_id, post, media_files)
+                except Exception as e:
+                    logger.opt(exception=e).error("Failed to send post to telegram")
+                    await bot.send_message(log_chat_id, f"Failed to send post to the channel, error: {e}")
 
             if posts:
                 state.reddit_last_seen_id = posts[-1].fullname
