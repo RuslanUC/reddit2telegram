@@ -54,6 +54,42 @@ async def _send_one_post(bot: Client, channel_id: int, post: RedditPost, media_f
         )
 
 
+async def _process_post(bot: Client, post: RedditPost, channel_id: int, log_chat_id: int) -> None:
+    logger.debug(f"Post: {post!r}")
+
+    if not post.media or len(post.media) > 10:
+        logger.info(f"Skipping post {post.id} ({post.title!r}): {len(post.media)=}")
+        return
+
+    logger.info(f"Sending post {post.id} ({post.title!r})")
+
+    media_files: list[BytesIO] = []
+    for idx, media in enumerate(post.media):
+        photo = BytesIO()
+        async with AsyncClient() as cl:
+            async with cl.stream("GET", media.url) as resp:
+                async for chunk in resp.aiter_bytes(1024 * 64):
+                    photo.write(chunk)
+
+        name = urlparse(media.url).path.split("/")[-1]
+        if not name:
+            name = f"{post.fullname}_{idx}.jpg"
+        setattr(photo, "name", name)
+        media_files.append(photo)
+
+    try:
+        await _send_one_post(bot, channel_id, post, media_files)
+    except Exception as e:
+        logger.opt(exception=e).error("Failed to send post to telegram")
+        await bot.send_message(
+            log_chat_id,
+            (
+                f"Failed to send post to the channel, error: {e}\n"
+                f"Post link: {post.url}"
+            )
+        )
+
+
 async def main() -> None:
     state_file = environ.get("STATE_FILE", "reddit2telegram.state")
 
@@ -97,6 +133,8 @@ async def main() -> None:
         print(f"Access token: {access_token}")
         print(f"Refresh token: {refresh_token}")
 
+    no_posts_count = 30 if environ.get("FORCE_REFETCH_LATEST") == "1" else 0
+
     async with bot:
         while True:
             try:
@@ -108,45 +146,34 @@ async def main() -> None:
                 continue
 
             for post in posts:
-                logger.debug(f"Post: {post!r}")
-
-                if not post.media or len(post.media) > 10:
-                    logger.info(f"Skipping post {post.id} ({post.title!r}): {len(post.media)=}")
-                    continue
-
-                logger.info(f"Sending post {post.id} ({post.title!r})")
-
-                media_files: list[BytesIO] = []
-                for idx, media in enumerate(post.media):
-                    photo = BytesIO()
-                    async with AsyncClient() as cl:
-                        async with cl.stream("GET", media.url) as resp:
-                            async for chunk in resp.aiter_bytes(1024 * 64):
-                                photo.write(chunk)
-
-                    name = urlparse(media.url).path.split("/")[-1]
-                    if not name:
-                        name = f"{post.fullname}_{idx}.jpg"
-                    setattr(photo, "name", name)
-                    media_files.append(photo)
-
-                try:
-                    await _send_one_post(bot, channel_id, post, media_files)
-                except Exception as e:
-                    logger.opt(exception=e).error("Failed to send post to telegram")
-                    await bot.send_message(
-                        log_chat_id,
-                        (
-                            f"Failed to send post to the channel, error: {e}\n"
-                            f"Post link: {post.url}"
-                        )
-                    )
+                await _process_post(bot, post, channel_id, log_chat_id)
 
             if posts:
+                no_posts_count = 0
                 state.reddit_last_seen_id = posts[-1].fullname
                 logger.info(f"Sent ~{len(posts)} posts, last seen id is {state.reddit_last_seen_id!r}")
             else:
                 logger.info("No new upvoted posts available")
+                no_posts_count += 1
+                if no_posts_count >= 30:
+                    logger.info(
+                        "No new posts were available for the past 30 requests, trying to re-fetch latest upvoted post"
+                    )
+                    try:
+                        post = await reddit.refetch_upvoted_maybe(reddit_username, state.reddit_last_seen_id)
+                    except Exception as e:
+                        logger.opt(exception=e).error("Failed to refetch latest upvoted post")
+                        await bot.send_message(
+                            log_chat_id, "Failed to refetch latest upvoted post, check logs for exact error"
+                        )
+                        no_posts_count -= 5
+                        continue
+
+                    if post is not None:
+                        state.reddit_last_seen_id = post.fullname
+                        await _process_post(bot, post, channel_id, log_chat_id)
+
+                    no_posts_count = 0
 
             reddit.save_tokens(state)
             state.dump(state_file)

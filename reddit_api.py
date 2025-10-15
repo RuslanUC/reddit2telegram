@@ -1,6 +1,5 @@
 import inspect
 import platform
-from enum import Enum, auto
 from os import urandom
 from time import time
 
@@ -149,7 +148,7 @@ class RedditClient:
                         body = resp.json()
                     except ValueError:
                         body = "<not json>"
-                    logger.debug(f"OAuth token refreshe response body: {body}")
+                    logger.debug(f"OAuth token refresh response body: {body}")
 
                     raise RuntimeError(f"Failed to get access token: error code {resp.status_code}")
 
@@ -158,10 +157,25 @@ class RedditClient:
 
         return self._access_token
 
-    async def get_upvoted(self, username: str, last_known_id: str | None) -> list[RedditPost]:
-        params = {"sort": "new", "t": "day", "limit": 100, "raw_json": "1"}
+    async def refetch_upvoted_maybe(self, username: str, last_known_id: str) -> RedditPost | None:
+        logger.debug("Trying to re-fetch latest upvoted post...")
+        upvoted = await self.get_upvoted(username, None, 1)
+        if not upvoted:
+            logger.debug("Failed to get latest upvoted post")
+            return None
+
+        if last_known_id == upvoted[0].fullname:
+            logger.debug("No posts were upvoted since last known post")
+            return None
+
+        return upvoted[0]
+
+    async def get_upvoted(self, username: str, last_known_id: str | None, limit: int = 100) -> list[RedditPost]:
+        params = {"sort": "new", "t": "week", "limit": limit, "raw_json": "1"}
         if last_known_id is not None:
             params["before"] = last_known_id
+
+        logger.trace(f"Requesting upvoted posts with {params=!r}")
 
         result = []
 
