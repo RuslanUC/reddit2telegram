@@ -17,6 +17,7 @@ services:
       - CHANNEL_ID=${CHANNEL_ID}
       - LOG_CHAT_ID=${LOG_CHAT_ID}
       - STATE_FILE=/reddit2telegram-state/reddit2telegram.state
+      - FORCE_REFETCH_LATEST=${FORCE_REFETCH_LATEST}
     restart: unless-stopped
 
 volumes:
